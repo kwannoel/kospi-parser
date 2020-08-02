@@ -13,10 +13,12 @@ import           Data.Attoparsec.ByteString (Parser)
 import qualified Data.Attoparsec.ByteString as P
 import           Data.ByteString            (ByteString)
 import qualified Data.ByteString            as BS
-import           Data.Foldable              (foldl')
+import           Data.Foldable              (foldl', traverse_)
+import           Data.Maybe                 (catMaybes)
 import           Data.Text.Encoding         (decodeUtf8)
 import           Data.Text.Read             (decimal)
-import           Data.Time                  (TimeOfDay (..), secondsToDiffTime,
+import           Data.Time                  (TimeOfDay (..), UTCTime,
+                                             secondsToDiffTime,
                                              secondsToNominalDiffTime,
                                              timeToTimeOfDay,
                                              utcToLocalTimeOfDay)
@@ -27,38 +29,45 @@ import           System.Environment         (getArgs)
 
 main :: IO ()
 main = do
+    -- Handle cli arguments
     filePath <- (!! 0) <$> getArgs
+
+    -- Open the pcap file
     pcapHandle <- openOffline filePath
-    _ <- dispatchBS pcapHandle (-1) packetCallback
-    return ()
 
-packetCallback :: PktHdr -> ByteString -> IO ()
-packetCallback header contents = do
-    print packetTime
-    case P.parse contentsP contents of
-        P.Done _ res -> print res
-        _            -> return ()
-    Prelude.putStrLn ""
-    where
-      -- | Packet header times are UNIX-time formatted by default
-      --
-      --   "time stamps are supplied as seconds since January 1, 1970, 00:00:00 UTC"
-      --   A google search yields the result that this is UNIX time.
-      --   -- Quoted from pcap docs: https://www.tcpdump.org/manpages/pcap-tstamp.7.html
-      --
-      --   This tells us how to convert to UTC time from UNIX time:
-      --   https://stackoverflow.com/questions/12916353/how-do-i-convert-from-unixtime-to-a-date-time-in-haskell
-      packetTime = posixSecondsToUTCTime -- Convert posix time to UTCTime
-                 $ secondsToNominalDiffTime -- Convert seconds to posix time
-                 $ (realToFrac $ hdrTime header) / 10 ^ 6 -- Convert micro seconds to seconds
-      kospiTimeZone = hoursToTimeZone 9 -- GMT +9
+    -- Get all packets
+    rawPkts <- getAllPackets pcapHandle
 
+    -- Print all quote packets to stdout
+    traverse_ outputPacket (processPackets $ rawPkts)
 
 -- =========
 -- = TYPES =
 -- =========
 
 data QuotePacket = QuotePacket
+    { packetTime     :: UTCTime
+    , packetContents :: PacketContents
+    }
+    deriving Show
+
+-- | Used to sort packets by accept times
+instance Ord QuotePacket where
+    q1 <= q2 = time1 <= time2
+      where
+        time1 = getAcceptTime q1
+        time2 = getAcceptTime q2
+        getAcceptTime = acceptTime . packetContents
+
+-- | Only checks equality of packet accept times
+instance Eq QuotePacket where
+    q1 == q2 = time1 == time2
+      where
+        time1 = getAcceptTime q1
+        time2 = getAcceptTime q2
+        getAcceptTime = acceptTime . packetContents
+
+data PacketContents = PacketContents
     { acceptTime :: TimeOfDay
     , issueCode  :: IssueCode
     , bids       :: [(Quantity, Price)]
@@ -71,16 +80,65 @@ type IssueCode = ByteString
 type Quantity = Integer
 type Price = Integer
 
+-- ==============
+-- = FORMATTERS =
+-- ==============
+
+outputPacket :: QuotePacket -> IO ()
+outputPacket = print
+
+-- =====================
+-- = PACKET PROCESSING =
+-- =====================
+
+getAllPackets :: PcapHandle -> IO [(PktHdr, ByteString)]
+getAllPackets hdl = do
+    res@(hdr, contents) <- nextBS hdl
+    case hdr of
+        -- When no more packets to read, this is returned
+        PktHdr 0 0 0 0 -> return []
+        _              -> fmap (res :) $ getAllPackets hdl
+
+processPackets :: [(PktHdr, ByteString)] -> [QuotePacket]
+processPackets = catMaybes . fmap processPacket
+
+processPacket :: (PktHdr, ByteString) -> Maybe QuotePacket
+processPacket (header, contents) = do
+    packetContents <- rawPacketContents
+    return $ QuotePacket { packetTime, packetContents }
+      -- | Packet header times are UNIX-time formatted by default
+      --
+      --   "time stamps are supplied as seconds since January 1, 1970, 00:00:00 UTC"
+      --   A google search yields the result that this is UNIX time.
+      --   -- Quoted from pcap docs: https://www.tcpdump.org/manpages/pcap-tstamp.7.html
+      --
+      --   This tells us how to convert to UTC time from UNIX time:
+      --   https://stackoverflow.com/questions/12916353/how-do-i-convert-from-unixtime-to-a-date-time-in-haskell
+    where
+        rawPacketContents =
+            case P.parse contentsP contents of
+                P.Done _ res -> Just res
+                _            -> Nothing
+
+        packetTime = posixSecondsToUTCTime -- Convert posix time to UTCTime
+                $ secondsToNominalDiffTime -- Convert seconds to posix time
+                $ (realToFrac $ hdrTime header) / 10 ^ 6 -- Convert micro seconds to seconds
+
+
+packetCallback :: PktHdr -> ByteString -> IO ()
+packetCallback header contents = do
+    undefined
+
 -- ===========
 -- = PARSERS =
 -- ===========
 
-contentsP :: Parser QuotePacket
+contentsP :: Parser PacketContents
 contentsP = P.choice [ P.try quotePacketP -- Try to parse a quotePacket
                      , P.anyWord8 *> contentsP
                      ]
 
-quotePacketP :: Parser QuotePacket
+quotePacketP :: Parser PacketContents
 quotePacketP = do
     P.string "B6034"
     issueCode <- issueIsinP
@@ -102,7 +160,7 @@ quotePacketP = do
 
     acceptTime <- acceptTimeP -- Quote accept time
     P.word8 0xff -- EOF
-    return $ QuotePacket { acceptTime, issueCode, bids, asks }
+    return $ PacketContents { acceptTime, issueCode, bids, asks }
 
     where
         skipP n = P.take n -- skip n bytes
