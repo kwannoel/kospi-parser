@@ -13,6 +13,7 @@ import           Data.Attoparsec.ByteString (Parser)
 import qualified Data.Attoparsec.ByteString as P
 import           Data.ByteString            (ByteString)
 import qualified Data.ByteString            as BS
+import qualified Data.ByteString.Char8      as BC (unpack)
 import           Data.Foldable              (foldl', traverse_)
 import           Data.List                  (sort)
 import           Data.Maybe                 (catMaybes)
@@ -48,10 +49,10 @@ main = do
     if shouldSort
     then
       -- Sort all packets and print them
-      traverse_ outputPacket (sort $ processPackets $ rawPkts)
+      traverse_ (putStrLn . formatQuotePacket) (sort $ processPackets $ rawPkts)
     else
       -- Print all quote packets to stdout
-      traverse_ outputPacket (processPackets $ rawPkts)
+      traverse_ (putStrLn . formatQuotePacket) (processPackets $ rawPkts)
 
 
 -- =========
@@ -97,8 +98,19 @@ type Price = Integer
 -- = FORMATTERS =
 -- ==============
 
-outputPacket :: QuotePacket -> IO ()
-outputPacket = print
+formatQuotePacket :: QuotePacket -> String
+formatQuotePacket (QuotePacket { packetTime, packetContents }) =
+    show packetTime ++ " " ++ formatPacketContents packetContents
+
+formatPacketContents :: PacketContents -> String
+formatPacketContents (PacketContents { acceptTime, issueCode, bids, asks }) =
+     show acceptTime ++ " "
+  ++ BC.unpack issueCode  ++ " "
+  ++ formatAll bids ++ " "
+  ++ formatAll asks
+    where
+      formatAll s = unwords $ format <$> s
+      format (qty, price) = show qty ++ "@" ++ show price
 
 -- =====================
 -- = PACKET PROCESSING =
@@ -160,7 +172,7 @@ quotePacketP = do
     skipP 2 -- Market Status type
 
     skipP 7 -- Total bid volume
-    bids <- P.count 5 bidP -- bids
+    bids <- reverse <$> P.count 5 bidP -- bids
 
     skipP 7 -- Total ask volume
     asks <- P.count 5 askP -- asks
