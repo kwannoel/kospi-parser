@@ -4,7 +4,8 @@ with pkgs;
 
 let
   my-ghc = haskellPackages.ghcWithPackages ( pkgs: [
-    haskellPackages.pcap haskellPackages.attoparsec
+    haskellPackages.pcap       # Bindings to libpcap
+    haskellPackages.attoparsec # Bytestring parser
   ] );
 
 in

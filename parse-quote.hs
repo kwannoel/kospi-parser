@@ -1,6 +1,6 @@
 {-
 
-DESCRIPTION
+DESCRIPTION:
 Parses PCAP file containing market feed data
 
 -}
