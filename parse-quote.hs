@@ -38,7 +38,7 @@ main = do
                 ["-r", filePath] -> (True, filePath)
                 [filePath, "-r"] -> (True, filePath)
                 [filePath] -> (False, filePath)
-                _ -> error "Invalid cli arguments, \n\n USAGE:\n    ./parse-quote [-r] FILE_PATH"
+                _ -> error "Invalid cli arguments. \n\n\nUSAGE: ./parse-quote [-r] FILE_PATH \n\n\n"
 
     -- Open the pcap file
     pcapHandle <- openOffline filePath
