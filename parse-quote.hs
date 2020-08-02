@@ -4,6 +4,8 @@ DESCRIPTION
 Parses PCAP file containing market feed data
 
 -}
+
+{-# OPTIONS_GHC -Wall -Wno-unused-do-bind #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -12,20 +14,13 @@ module Main where
 import           Data.Attoparsec.ByteString (Parser)
 import qualified Data.Attoparsec.ByteString as P
 import           Data.ByteString            (ByteString)
-import qualified Data.ByteString            as BS
 import qualified Data.ByteString.Char8      as BC (unpack)
 import           Data.Foldable              (foldl', traverse_)
 import           Data.List                  (sort)
 import           Data.Maybe                 (catMaybes)
-import           Data.Text.Encoding         (decodeUtf8)
-import           Data.Text.Read             (decimal)
 import           Data.Time                  (TimeOfDay (..), UTCTime,
-                                             secondsToDiffTime,
-                                             secondsToNominalDiffTime,
-                                             timeToTimeOfDay,
-                                             utcToLocalTimeOfDay)
+                                             secondsToNominalDiffTime)
 import           Data.Time.Clock.POSIX      (posixSecondsToUTCTime)
-import           Data.Time.LocalTime        (hoursToTimeZone)
 import           Network.Pcap
 import           System.Environment         (getArgs)
 
@@ -35,9 +30,9 @@ main = do
     args <- getArgs
     let (shouldSort, filePath) =
             case args of
-                ["-r", filePath] -> (True, filePath)
-                [filePath, "-r"] -> (True, filePath)
-                [filePath] -> (False, filePath)
+                ["-r", fp] -> (True, fp)
+                [fp, "-r"] -> (True, fp)
+                [fp] -> (False, fp)
                 _ -> error "Invalid cli arguments. \n\n\nUSAGE: ./parse-quote [-r] FILE_PATH \n\n\n"
 
     -- Open the pcap file
@@ -118,7 +113,7 @@ formatPacketContents (PacketContents { acceptTime, issueCode, bids, asks }) =
 
 getAllPackets :: PcapHandle -> IO [(PktHdr, ByteString)]
 getAllPackets hdl = do
-    res@(hdr, contents) <- nextBS hdl
+    res@(hdr, _) <- nextBS hdl
     case hdr of
         -- When no more packets to read, this is returned
         PktHdr 0 0 0 0 -> return []
@@ -147,12 +142,8 @@ processPacket (header, contents) = do
 
         packetTime = posixSecondsToUTCTime -- Convert posix time to UTCTime
                 $ secondsToNominalDiffTime -- Convert seconds to posix time
-                $ (realToFrac $ hdrTime header) / 10 ^ 6 -- Convert micro seconds to seconds
+                $ (realToFrac $ hdrTime header) / 10 ^ (6 :: Integer) -- Convert micro seconds to seconds
 
-
-packetCallback :: PktHdr -> ByteString -> IO ()
-packetCallback header contents = do
-    undefined
 
 -- ===========
 -- = PARSERS =
