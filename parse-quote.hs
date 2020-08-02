@@ -14,6 +14,7 @@ import qualified Data.Attoparsec.ByteString as P
 import           Data.ByteString            (ByteString)
 import qualified Data.ByteString            as BS
 import           Data.Foldable              (foldl', traverse_)
+import           Data.List                  (sort)
 import           Data.Maybe                 (catMaybes)
 import           Data.Text.Encoding         (decodeUtf8)
 import           Data.Text.Read             (decimal)
@@ -30,7 +31,13 @@ import           System.Environment         (getArgs)
 main :: IO ()
 main = do
     -- Handle cli arguments
-    filePath <- (!! 0) <$> getArgs
+    args <- getArgs
+    let (shouldSort, filePath) =
+            case args of
+                ["-r", filePath] -> (True, filePath)
+                [filePath, "-r"] -> (True, filePath)
+                [filePath] -> (False, filePath)
+                _ -> error "Invalid cli arguments, \n\n USAGE:\n    ./parse-quote [-r] FILE_PATH"
 
     -- Open the pcap file
     pcapHandle <- openOffline filePath
@@ -38,8 +45,14 @@ main = do
     -- Get all packets
     rawPkts <- getAllPackets pcapHandle
 
-    -- Print all quote packets to stdout
-    traverse_ outputPacket (processPackets $ rawPkts)
+    if shouldSort
+    then
+      -- Sort all packets and print them
+      traverse_ outputPacket (sort $ processPackets $ rawPkts)
+    else
+      -- Print all quote packets to stdout
+      traverse_ outputPacket (processPackets $ rawPkts)
+
 
 -- =========
 -- = TYPES =
